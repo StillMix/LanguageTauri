@@ -109,7 +109,6 @@ export default {
     }
 
     // Запускаем код
-    // Улучшенная функция runCode с поддержкой асинхронного кода
     function runCode() {
       if (!consoleOutput.value) return
 
@@ -118,35 +117,6 @@ export default {
 
       // Добавляем вывод в консоль
       consoleOutput.value.innerHTML += '<div class="console-line">Выполнение кода...</div>'
-
-      // Проверяем наличие асинхронных операций
-      const hasSetTimeout = userCode.value.includes('setTimeout')
-      const hasPromise = userCode.value.includes('Promise')
-      const hasAsync = userCode.value.includes('async') || userCode.value.includes('await')
-      const hasAsyncOperations = hasSetTimeout || hasPromise || hasAsync
-
-      // Рассчитываем время ожидания
-      let maxDelay = 0
-      if (hasSetTimeout) {
-        // Ищем все setTimeout вызовы и находим максимальную задержку
-        const timeoutRegex = /setTimeout\s*\(\s*[\w\s\(\)=>,."'`{}]+,\s*(\d+)\s*\)/g
-        let match
-        while ((match = timeoutRegex.exec(userCode.value)) !== null) {
-          const delay = parseInt(match[1], 10)
-          if (!isNaN(delay) && delay > maxDelay) {
-            maxDelay = delay
-          }
-        }
-      }
-
-      // Если обнаружены асинхронные операции, информируем пользователя
-      if (hasAsyncOperations) {
-        consoleOutput.value.innerHTML += `<div class="console-line info">Обнаружены асинхронные операции (setTimeout, Promise или async/await).</div>`
-
-        if (maxDelay > 0) {
-          consoleOutput.value.innerHTML += `<div class="console-line info">Максимальная задержка setTimeout: ${maxDelay}мс.</div>`
-        }
-      }
 
       // Создаем систему перехвата console.log и других методов консоли
       const logs = []
@@ -175,21 +145,77 @@ export default {
         originalConsole.warn.apply(console, args)
       }
 
+      // Находим все вызовы setTimeout, даже вложенные
+      function findAllTimeouts(code) {
+        const timeoutRegex = /setTimeout\s*\(\s*[\w\s\(\)\{\}=>,."'`]+,\s*(\d+)\s*\)/g
+        let match
+        let maxDelay = 0
+        const timeouts = []
+
+        // Сначала найдем все явные setTimeout
+        while ((match = timeoutRegex.exec(code)) !== null) {
+          const delay = parseInt(match[1], 10)
+          if (!isNaN(delay)) {
+            timeouts.push(delay)
+            if (delay > maxDelay) maxDelay = delay
+          }
+        }
+
+        // Проверяем наличие вложенных setTimeout
+        const hasNestedTimeouts =
+          code.includes('setTimeout') && (code.match(/setTimeout/g) || []).length > timeouts.length
+
+        // Если есть вложенные таймауты, добавляем дополнительное время
+        if (hasNestedTimeouts) {
+          // Примерно оцениваем максимальную глубину вложенности
+          const nestingLevel = Math.min(
+            5,
+            (code.match(/setTimeout/g) || []).length - timeouts.length,
+          )
+          maxDelay += nestingLevel * 2000 // Добавляем дополнительное время для каждого уровня вложенности
+        }
+
+        return { maxDelay, hasNestedTimeouts }
+      }
+
+      // Анализируем код на наличие асинхронных операций
+      const hasSetTimeout = userCode.value.includes('setTimeout')
+      const hasPromise = userCode.value.includes('Promise')
+      const hasAsync = userCode.value.includes('async') || userCode.value.includes('await')
+      const hasAsyncOperations = hasSetTimeout || hasPromise || hasAsync
+
+      // Определяем максимальную задержку
+      let maxWaitTime = 2000 // Базовое время ожидания
+      let hasNestedTimeouts = false
+
+      if (hasSetTimeout) {
+        const timeoutInfo = findAllTimeouts(userCode.value)
+        maxWaitTime = Math.max(maxWaitTime, timeoutInfo.maxDelay + 1000)
+        hasNestedTimeouts = timeoutInfo.hasNestedTimeouts
+      }
+
+      // Если обнаружены асинхронные операции, информируем пользователя
+      if (hasAsyncOperations) {
+        consoleOutput.value.innerHTML += `<div class="console-line info">Обнаружены асинхронные операции (setTimeout, Promise или async/await).</div>`
+
+        if (hasSetTimeout) {
+          consoleOutput.value.innerHTML += `<div class="console-line info">Максимальная задержка setTimeout: ${maxWaitTime - 1000}мс.</div>`
+
+          if (hasNestedTimeouts) {
+            consoleOutput.value.innerHTML += `<div class="console-line info">Обнаружены вложенные setTimeout.</div>`
+          }
+        }
+      }
+
       try {
         // Создаем функцию для выполнения кода
-        // Заключаем код пользователя в самовызывающуюся функцию,
-        // чтобы предотвратить ошибки области видимости
         new Function(`
       (function() {
         ${userCode.value}
       })();
     `)()
 
-        // Определяем время ожидания результатов в зависимости от наличия асинхронных операций
-        // Добавляем небольшой запас к максимальной задержке
-        const waitTime = hasAsyncOperations ? Math.max(maxDelay + 500, 2000) : 500
-
-        // Отображаем результаты выполнения кода через рассчитанный интервал
+        // Отображаем результаты выполнения кода
         setTimeout(() => {
           // Отображаем все накопленные логи
           if (logs.length > 0) {
@@ -223,7 +249,7 @@ export default {
           console.log = originalConsole.log
           console.error = originalConsole.error
           console.warn = originalConsole.warn
-        }, waitTime)
+        }, maxWaitTime)
       } catch (error) {
         // В случае ошибки выводим сообщение об ошибке
         consoleOutput.value.innerHTML += `<div class="console-line error">Ошибка при выполнении: ${error.message}</div>`
