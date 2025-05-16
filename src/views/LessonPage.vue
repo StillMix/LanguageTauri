@@ -119,33 +119,38 @@ export default {
       consoleOutput.value.innerHTML += '<div class="console-line">Выполнение кода...</div>'
 
       // Создаем систему перехвата console.log и других методов консоли
-      const logs = []
       const originalConsole = {
         log: console.log,
         error: console.error,
         warn: console.warn,
       }
 
-      // Переопределяем методы консоли
+      // Переопределяем методы консоли для вывода в реальном времени
       console.log = function (...args) {
         const message = args.map((arg) => String(arg)).join(' ')
-        logs.push({ type: 'log', message, time: Date.now() })
+        // Сразу выводим сообщение в консоль
+        consoleOutput.value.innerHTML += `<div class="console-line">${message}</div>`
+        // Прокручиваем консоль вниз для видимости новых сообщений
+        consoleOutput.value.scrollTop = consoleOutput.value.scrollHeight
+        // Также вызываем оригинальный метод
         originalConsole.log.apply(console, args)
       }
 
       console.error = function (...args) {
         const message = args.map((arg) => String(arg)).join(' ')
-        logs.push({ type: 'error', message, time: Date.now() })
+        consoleOutput.value.innerHTML += `<div class="console-line error">${message}</div>`
+        consoleOutput.value.scrollTop = consoleOutput.value.scrollHeight
         originalConsole.error.apply(console, args)
       }
 
       console.warn = function (...args) {
         const message = args.map((arg) => String(arg)).join(' ')
-        logs.push({ type: 'warn', message, time: Date.now() })
+        consoleOutput.value.innerHTML += `<div class="console-line warning">${message}</div>`
+        consoleOutput.value.scrollTop = consoleOutput.value.scrollHeight
         originalConsole.warn.apply(console, args)
       }
 
-      // Находим все вызовы setTimeout, даже вложенные
+      // Находим все вызовы setTimeout
       function findAllTimeouts(code) {
         const timeoutRegex = /setTimeout\s*\(\s*[\w\s\(\)\{\}=>,."'`]+,\s*(\d+)\s*\)/g
         let match
@@ -172,7 +177,7 @@ export default {
             5,
             (code.match(/setTimeout/g) || []).length - timeouts.length,
           )
-          maxDelay += nestingLevel * 2000 // Добавляем дополнительное время для каждого уровня вложенности
+          maxDelay += nestingLevel * 2000
         }
 
         return { maxDelay, hasNestedTimeouts }
@@ -207,6 +212,9 @@ export default {
         }
       }
 
+      // Переменная для отслеживания исполнения программы
+      let programRunning = true
+
       try {
         // Создаем функцию для выполнения кода
         new Function(`
@@ -215,49 +223,30 @@ export default {
       })();
     `)()
 
-        // Отображаем результаты выполнения кода
+        // Отображаем сообщение об успешном выполнении после всех асинхронных операций
         setTimeout(() => {
-          // Отображаем все накопленные логи
-          if (logs.length > 0) {
-            // Сортируем логи по времени
-            logs.sort((a, b) => a.time - b.time)
-
-            logs.forEach((log) => {
-              let cssClass = ''
-              switch (log.type) {
-                case 'error':
-                  cssClass = 'error'
-                  break
-                case 'warn':
-                  cssClass = 'warning'
-                  break
-                default:
-                  cssClass = ''
-                  break
-              }
-              consoleOutput.value.innerHTML += `<div class="console-line ${cssClass}">${log.message}</div>`
-            })
-          } else {
+          if (programRunning) {
             consoleOutput.value.innerHTML +=
-              '<div class="console-line">Программа выполнена, но ничего не выведено в консоль.</div>'
+              '<div class="console-line success">Программа выполнена успешно!</div>'
+            consoleOutput.value.scrollTop = consoleOutput.value.scrollHeight
           }
-
-          consoleOutput.value.innerHTML +=
-            '<div class="console-line success">Программа выполнена успешно!</div>'
 
           // Восстанавливаем оригинальные методы консоли
           console.log = originalConsole.log
           console.error = originalConsole.error
           console.warn = originalConsole.warn
+          programRunning = false
         }, maxWaitTime)
       } catch (error) {
         // В случае ошибки выводим сообщение об ошибке
         consoleOutput.value.innerHTML += `<div class="console-line error">Ошибка при выполнении: ${error.message}</div>`
+        consoleOutput.value.scrollTop = consoleOutput.value.scrollHeight
 
         // Восстанавливаем оригинальные методы консоли
         console.log = originalConsole.log
         console.error = originalConsole.error
         console.warn = originalConsole.warn
+        programRunning = false
       }
     }
     // Очищаем консоль
