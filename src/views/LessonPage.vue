@@ -110,7 +110,7 @@ export default {
     }
 
     // Запускаем код
-// Полностью переработанная функция runCode с использованием iframe для изоляции и перехвата всех логов
+
 function runCode() {
   if (!consoleOutput.value) return;
   
