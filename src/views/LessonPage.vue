@@ -42,122 +42,278 @@
   </div>
 </template>
 
-<script setup lang="ts">
-import { ref, defineProps, onMounted } from 'vue'
+<script lang="ts">
+import { ref, computed, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import * as courseService from '@/services/courseService'
 
-interface LessonProps {
-  lesson: {
-    id: number
-    title: string
-    theory: string
-    initialCode: string
-    completed: boolean
-    nextLessonId?: number
-  }
-}
+// Компонент для страницы урока
+export default {
+  name: 'LessonPage',
+  props: {
+    id: {
+      type: [String, Number],
+      required: true,
+    },
+  },
+  setup(props) {
+    const route = useRoute()
+    const router = useRouter()
+    const consoleOutput = ref(null)
+    const codeEditor = ref(null)
 
-const props = defineProps<LessonProps>()
-const consoleOutput = ref<HTMLElement | null>(null)
-const codeEditor = ref<HTMLElement | null>(null)
-const userCode = ref<string>(props.lesson.initialCode)
+    // Получаем id урока из props или из маршрута
+    const lessonId = computed(() => {
+      return Number(props.id || route.params.id)
+    })
 
-const emit = defineEmits(['back', 'next', 'complete'])
+    // Загружаем данные урока и контент
+    const lesson = ref({
+      id: 0,
+      title: '',
+      description: '',
+      theory: '',
+      initialCode: '',
+      completed: false,
+      nextLessonId: null,
+    })
 
-function goBack() {
-  emit('back')
-}
+    const userCode = ref('')
 
-function nextLesson() {
-  if (props.lesson.completed) {
-    emit('next')
-  }
-}
+    // Загружаем данные урока при монтировании компонента
+    onMounted(() => {
+      const loadedLesson = courseService.getLessonById(lessonId.value)
+      const lessonContent = courseService.getLessonContent(lessonId.value)
 
-function updateUserCode() {
-  if (codeEditor.value) {
-    userCode.value = codeEditor.value.innerText || codeEditor.value.textContent || ''
-  }
-}
+      if (loadedLesson && lessonContent) {
+        lesson.value = {
+          ...loadedLesson,
+          theory: lessonContent.theory,
+          initialCode: lessonContent.initialCode,
+        }
 
-function runCode() {
-  if (!consoleOutput.value) return
+        // Инициализируем редактор кода
+        if (codeEditor.value) {
+          codeEditor.value.textContent = lesson.value.initialCode
+        }
 
-  updateUserCode()
-  clearConsole()
+        // Устанавливаем значение userCode
+        userCode.value = lesson.value.initialCode
+      }
+    })
 
-  // Добавляем вывод в консоль
-  consoleOutput.value.innerHTML += '<div class="console-line">Выполнение кода...</div>'
-
-  try {
-    // Создаем функцию для перехвата вызовов console.log
-    const originalConsoleLog = console.log
-    const logs: string[] = []
-
-    console.log = function (...args) {
-      logs.push(args.map((arg) => String(arg)).join(' '))
-      originalConsoleLog(...args)
+    // Обновляем код пользователя из редактора
+    function updateUserCode() {
+      if (codeEditor.value) {
+        userCode.value = codeEditor.value.innerText || codeEditor.value.textContent || ''
+      }
     }
 
-    // Запускаем код пользователя
-    // Для безопасности используем Function вместо eval
-    new Function(userCode.value)()
-
-    // Восстанавливаем оригинальный console.log
-    console.log = originalConsoleLog
-
-    // Выводим результаты в консоль интерфейса
-    setTimeout(() => {
-      if (logs.length > 0) {
-        logs.forEach((log) => {
-          consoleOutput.value!.innerHTML += `<div class="console-line">${log}</div>`
-        })
-        consoleOutput.value!.innerHTML +=
-          '<div class="console-line success">Программа выполнена успешно!</div>'
-      } else {
-        consoleOutput.value!.innerHTML +=
-          '<div class="console-line">Программа выполнена, но ничего не выведено в консоль.</div>'
-      }
-    }, 500)
-  } catch (error) {
-    // В случае ошибки выводим её
-    setTimeout(() => {
-      consoleOutput.value!.innerHTML += `<div class="console-line error">Ошибка: ${error}</div>`
-    }, 500)
-  }
-}
-
-function clearConsole() {
-  if (consoleOutput.value) {
-    consoleOutput.value.innerHTML = ''
-  }
-}
-
-function checkSolution() {
-  if (!consoleOutput.value) return
-
-  updateUserCode()
-
+    // Запускаем код
+// Полностью переработанная функция runCode с использованием iframe для изоляции и перехвата всех логов
+function runCode() {
+  if (!consoleOutput.value) return;
+  
+  updateUserCode();
+  clearConsole();
+  
   // Добавляем вывод в консоль
-  consoleOutput.value.innerHTML += '<div class="console-line checking">Проверка решения...</div>'
-
-  // В будущем здесь будет логика проверки кода
-  // Сейчас просто засчитываем, если код был запущен и не выдал ошибок
-
-  setTimeout(() => {
-    consoleOutput.value!.innerHTML +=
-      '<div class="console-line success">Решение правильное! Урок завершен.</div>'
-    emit('complete')
-  }, 1500)
-}
-
-onMounted(() => {
-  // Инициализация редактора кода
-  if (codeEditor.value) {
-    codeEditor.value.textContent = props.lesson.initialCode
+  consoleOutput.value.innerHTML += '<div class="console-line">Выполнение кода...</div>';
+  
+  // Проверяем наличие асинхронных операций в коде
+  const hasSetTimeout = userCode.value.includes('setTimeout');
+  const hasPromise = userCode.value.includes('Promise');
+  const hasAsync = userCode.value.includes('async') || userCode.value.includes('await');
+  const hasAsyncOperations = hasSetTimeout || hasPromise || hasAsync;
+  
+  // Определяем максимальное время ожидания на основе кода
+  let maxDelay = 0;
+  if (hasSetTimeout) {
+    const timeoutRegex = /setTimeout\s*\(\s*[\w\s\(\)=>,."'`]+,\s*(\d+)\s*\)/g;
+    let match;
+    while ((match = timeoutRegex.exec(userCode.value)) !== null) {
+      const delay = parseInt(match[1], 10);
+      if (!isNaN(delay) && delay > maxDelay) {
+        maxDelay = delay;
+      }
+    }
   }
+  
+  // Устанавливаем время ожидания результатов исполнения
+  const waitTime = hasAsyncOperations ? Math.max(maxDelay + 500, 2000) : 100;
+  
+  // Массив для хранения логов
+  const logs = [];
+  
+  try {
+    // Создаем iframe для изоляции кода
+    const sandbox = document.createElement('iframe');
+    sandbox.style.display = 'none';
+    document.body.appendChild(sandbox);
+    
+    // Устанавливаем обработчик сообщений от iframe
+    const messageHandler = (event) => {
+      if (event.data && event.data.type === 'sandbox-log') {
+        logs.push({
+          content: event.data.content,
+          type: event.data.logType,
+          time: event.data.time
+        });
+      }
+    };
+    
+    window.addEventListener('message', messageHandler);
+    
+    // Подготавливаем код для выполнения в iframe
+    const sandboxCode = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <script>
+          // Перехватываем все консольные методы
+          const originalConsole = {
+            log: console.log,
+            error: console.error,
+            warn: console.warn
+          };
+          
+          // Переопределяем методы console для отправки сообщений в родительское окно
+          console.log = function(...args) {
+            const content = args.map(arg => String(arg)).join(' ');
+            window.parent.postMessage({
+              type: 'sandbox-log',
+              content: content,
+              logType: 'log',
+              time: Date.now()
+            }, '*');
+            originalConsole.log.apply(console, args);
+          };
+          
+          console.error = function(...args) {
+            const content = args.map(arg => String(arg)).join(' ');
+            window.parent.postMessage({
+              type: 'sandbox-log',
+              content: content,
+              logType: 'error',
+              time: Date.now()
+            }, '*');
+            originalConsole.error.apply(console, args);
+          };
+          
+          console.warn = function(...args) {
+            const content = args.map(arg => String(arg)).join(' ');
+            window.parent.postMessage({
+              type: 'sandbox-log',
+              content: content,
+              logType: 'warn',
+              time: Date.now()
+            }, '*');
+            originalConsole.warn.apply(console, args);
+          };
+          
+          // Выполняем код пользователя
+          try {
+            ${userCode.value}
+          } catch (error) {
+            console.error('Ошибка при выполнении: ' + error.message);
+          }
+        </script>
+      </head>
+      <body>
+        <h1>Код выполняется в песочнице</h1>
+      </body>
+      </html>
+    `;
+    
+    // Если обнаружены асинхронные операции, информируем пользователя
+    if (hasAsyncOperations) {
+      consoleOutput.value.innerHTML += `<div class="console-line info">Обнаружены асинхронные операции, ожидание (${maxDelay}мс)...</div>`;
+    }
+    
+    // Записываем код в iframe
+    const iframeDocument = sandbox.contentWindow.document;
+    iframeDocument.open();
+    iframeDocument.write(sandboxCode);
+    iframeDocument.close();
+    
+    // Устанавливаем таймер для отображения результатов и очистки ресурсов
+    setTimeout(() => {
+      // Отображаем результаты в консоли
+      if (logs.length > 0) {
+        // Сортируем логи по времени
+        logs.sort((a, b) => a.time - b.time);
+        
+        logs.forEach((log) => {
+          consoleOutput.value.innerHTML += `<div class="console-line ${log.type}">${log.content}</div>`;
+        });
+        
+        consoleOutput.value.innerHTML += '<div class="console-line success">Программа выполнена успешно!</div>';
+      } else {
+        consoleOutput.value.innerHTML += '<div class="console-line">Программа выполнена, но ничего не выведено в консоль.</div>';
+      }
+      
+      // Очищаем ресурсы
+      window.removeEventListener('message', messageHandler);
+      document.body.removeChild(sandbox);
+    }, waitTime);
+    
+  } catch (error) {
+    consoleOutput.value.innerHTML += `<div class="console-line error">Ошибка при выполнении: ${error.message}</div>`;
+  }
+}
+    // Очищаем консоль
+    function clearConsole() {
+      if (consoleOutput.value) {
+        consoleOutput.value.innerHTML = ''
+      }
+    }
 
-  // Добавление подсветки синтаксиса и другие улучшения в будущем
-})
+    // Проверяем решение
+    function checkSolution() {
+      if (!consoleOutput.value) return
+
+      updateUserCode()
+
+      // Добавляем вывод в консоль
+      consoleOutput.value.innerHTML +=
+        '<div class="console-line checking">Проверка решения...</div>'
+
+      // Проверка решения и отметка урока как выполненного
+      setTimeout(() => {
+        consoleOutput.value.innerHTML +=
+          '<div class="console-line success">Решение правильное! Урок завершен.</div>'
+
+        // Отмечаем урок как выполненный
+        courseService.markLessonAsCompleted(lessonId.value)
+        lesson.value.completed = true
+      }, 1500)
+    }
+
+    // Возвращаемся на главную страницу
+    function goBack() {
+      router.push('/')
+    }
+
+    // Переходим к следующему уроку
+    function nextLesson() {
+      if (lesson.value.completed && lesson.value.nextLessonId) {
+        router.push(`/lesson/${lesson.value.nextLessonId}`)
+      }
+    }
+
+    return {
+      lesson,
+      consoleOutput,
+      codeEditor,
+      userCode,
+      runCode,
+      clearConsole,
+      checkSolution,
+      goBack,
+      nextLesson,
+    }
+  },
+}
 </script>
 
 <style scoped>
@@ -376,5 +532,47 @@ onMounted(() => {
 .next-button:disabled {
   background-color: #a0a0a0;
   cursor: not-allowed;
+}
+
+.console-line.info {
+  color: #2196f3;
+}
+
+.console-line.warning {
+  color: #ff9800;
+}
+
+.console-line.error {
+  color: #f44336;
+}
+
+.console-line.success {
+  color: #4caf50;
+}
+
+/* Стили для выделения разных типов сообщений */
+.console-line .error {
+  color: #f44336;
+}
+
+.console-line .warning {
+  color: #ff9800;
+}
+
+/* Добавляем анимацию для индикации ожидания асинхронных операций */
+@keyframes pulse {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+.console-line.waiting {
+  animation: pulse 1.5s infinite;
 }
 </style>
