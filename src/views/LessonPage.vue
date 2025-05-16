@@ -47,7 +47,6 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import * as courseService from '@/services/courseService'
 
-// Компонент для страницы урока
 export default {
   name: 'LessonPage',
   props: {
@@ -110,157 +109,131 @@ export default {
     }
 
     // Запускаем код
+    // Улучшенная функция runCode с поддержкой асинхронного кода
+    function runCode() {
+      if (!consoleOutput.value) return
 
-function runCode() {
-  if (!consoleOutput.value) return;
-  
-  updateUserCode();
-  clearConsole();
-  
-  // Добавляем вывод в консоль
-  consoleOutput.value.innerHTML += '<div class="console-line">Выполнение кода...</div>';
-  
-  // Проверяем наличие асинхронных операций в коде
-  const hasSetTimeout = userCode.value.includes('setTimeout');
-  const hasPromise = userCode.value.includes('Promise');
-  const hasAsync = userCode.value.includes('async') || userCode.value.includes('await');
-  const hasAsyncOperations = hasSetTimeout || hasPromise || hasAsync;
-  
-  // Определяем максимальное время ожидания на основе кода
-  let maxDelay = 0;
-  if (hasSetTimeout) {
-    const timeoutRegex = /setTimeout\s*\(\s*[\w\s\(\)=>,."'`]+,\s*(\d+)\s*\)/g;
-    let match;
-    while ((match = timeoutRegex.exec(userCode.value)) !== null) {
-      const delay = parseInt(match[1], 10);
-      if (!isNaN(delay) && delay > maxDelay) {
-        maxDelay = delay;
-      }
-    }
-  }
-  
-  // Устанавливаем время ожидания результатов исполнения
-  const waitTime = hasAsyncOperations ? Math.max(maxDelay + 500, 2000) : 100;
-  
-  // Массив для хранения логов
-  const logs = [];
-  
-  try {
-    // Создаем iframe для изоляции кода
-    const sandbox = document.createElement('iframe');
-    sandbox.style.display = 'none';
-    document.body.appendChild(sandbox);
-    
-    // Устанавливаем обработчик сообщений от iframe
-    const messageHandler = (event) => {
-      if (event.data && event.data.type === 'sandbox-log') {
-        logs.push({
-          content: event.data.content,
-          type: event.data.logType,
-          time: event.data.time
-        });
-      }
-    };
-    
-    window.addEventListener('message', messageHandler);
-    
-    // Подготавливаем код для выполнения в iframe
-    const sandboxCode = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <script>
-          // Перехватываем все консольные методы
-          const originalConsole = {
-            log: console.log,
-            error: console.error,
-            warn: console.warn
-          };
-          
-          // Переопределяем методы console для отправки сообщений в родительское окно
-          console.log = function(...args) {
-            const content = args.map(arg => String(arg)).join(' ');
-            window.parent.postMessage({
-              type: 'sandbox-log',
-              content: content,
-              logType: 'log',
-              time: Date.now()
-            }, '*');
-            originalConsole.log.apply(console, args);
-          };
-          
-          console.error = function(...args) {
-            const content = args.map(arg => String(arg)).join(' ');
-            window.parent.postMessage({
-              type: 'sandbox-log',
-              content: content,
-              logType: 'error',
-              time: Date.now()
-            }, '*');
-            originalConsole.error.apply(console, args);
-          };
-          
-          console.warn = function(...args) {
-            const content = args.map(arg => String(arg)).join(' ');
-            window.parent.postMessage({
-              type: 'sandbox-log',
-              content: content,
-              logType: 'warn',
-              time: Date.now()
-            }, '*');
-            originalConsole.warn.apply(console, args);
-          };
-          
-          // Выполняем код пользователя
-          try {
-            ${userCode.value}
-          } catch (error) {
-            console.error('Ошибка при выполнении: ' + error.message);
+      updateUserCode()
+      clearConsole()
+
+      // Добавляем вывод в консоль
+      consoleOutput.value.innerHTML += '<div class="console-line">Выполнение кода...</div>'
+
+      // Проверяем наличие асинхронных операций
+      const hasSetTimeout = userCode.value.includes('setTimeout')
+      const hasPromise = userCode.value.includes('Promise')
+      const hasAsync = userCode.value.includes('async') || userCode.value.includes('await')
+      const hasAsyncOperations = hasSetTimeout || hasPromise || hasAsync
+
+      // Рассчитываем время ожидания
+      let maxDelay = 0
+      if (hasSetTimeout) {
+        // Ищем все setTimeout вызовы и находим максимальную задержку
+        const timeoutRegex = /setTimeout\s*\(\s*[\w\s\(\)=>,."'`{}]+,\s*(\d+)\s*\)/g
+        let match
+        while ((match = timeoutRegex.exec(userCode.value)) !== null) {
+          const delay = parseInt(match[1], 10)
+          if (!isNaN(delay) && delay > maxDelay) {
+            maxDelay = delay
           }
-        </script>
-      </head>
-      <body>
-        <h1>Код выполняется в песочнице</h1>
-      </body>
-      </html>
-    `;
-    
-    // Если обнаружены асинхронные операции, информируем пользователя
-    if (hasAsyncOperations) {
-      consoleOutput.value.innerHTML += `<div class="console-line info">Обнаружены асинхронные операции, ожидание (${maxDelay}мс)...</div>`;
-    }
-    
-    // Записываем код в iframe
-    const iframeDocument = sandbox.contentWindow.document;
-    iframeDocument.open();
-    iframeDocument.write(sandboxCode);
-    iframeDocument.close();
-    
-    // Устанавливаем таймер для отображения результатов и очистки ресурсов
-    setTimeout(() => {
-      // Отображаем результаты в консоли
-      if (logs.length > 0) {
-        // Сортируем логи по времени
-        logs.sort((a, b) => a.time - b.time);
-        
-        logs.forEach((log) => {
-          consoleOutput.value.innerHTML += `<div class="console-line ${log.type}">${log.content}</div>`;
-        });
-        
-        consoleOutput.value.innerHTML += '<div class="console-line success">Программа выполнена успешно!</div>';
-      } else {
-        consoleOutput.value.innerHTML += '<div class="console-line">Программа выполнена, но ничего не выведено в консоль.</div>';
+        }
       }
-      
-      // Очищаем ресурсы
-      window.removeEventListener('message', messageHandler);
-      document.body.removeChild(sandbox);
-    }, waitTime);
-    
-  } catch (error) {
-    consoleOutput.value.innerHTML += `<div class="console-line error">Ошибка при выполнении: ${error.message}</div>`;
-  }
-}
+
+      // Если обнаружены асинхронные операции, информируем пользователя
+      if (hasAsyncOperations) {
+        consoleOutput.value.innerHTML += `<div class="console-line info">Обнаружены асинхронные операции (setTimeout, Promise или async/await).</div>`
+
+        if (maxDelay > 0) {
+          consoleOutput.value.innerHTML += `<div class="console-line info">Максимальная задержка setTimeout: ${maxDelay}мс.</div>`
+        }
+      }
+
+      // Создаем систему перехвата console.log и других методов консоли
+      const logs = []
+      const originalConsole = {
+        log: console.log,
+        error: console.error,
+        warn: console.warn,
+      }
+
+      // Переопределяем методы консоли
+      console.log = function (...args) {
+        const message = args.map((arg) => String(arg)).join(' ')
+        logs.push({ type: 'log', message, time: Date.now() })
+        originalConsole.log.apply(console, args)
+      }
+
+      console.error = function (...args) {
+        const message = args.map((arg) => String(arg)).join(' ')
+        logs.push({ type: 'error', message, time: Date.now() })
+        originalConsole.error.apply(console, args)
+      }
+
+      console.warn = function (...args) {
+        const message = args.map((arg) => String(arg)).join(' ')
+        logs.push({ type: 'warn', message, time: Date.now() })
+        originalConsole.warn.apply(console, args)
+      }
+
+      try {
+        // Создаем функцию для выполнения кода
+        // Заключаем код пользователя в самовызывающуюся функцию,
+        // чтобы предотвратить ошибки области видимости
+        new Function(`
+      (function() {
+        ${userCode.value}
+      })();
+    `)()
+
+        // Определяем время ожидания результатов в зависимости от наличия асинхронных операций
+        // Добавляем небольшой запас к максимальной задержке
+        const waitTime = hasAsyncOperations ? Math.max(maxDelay + 500, 2000) : 500
+
+        // Отображаем результаты выполнения кода через рассчитанный интервал
+        setTimeout(() => {
+          // Отображаем все накопленные логи
+          if (logs.length > 0) {
+            // Сортируем логи по времени
+            logs.sort((a, b) => a.time - b.time)
+
+            logs.forEach((log) => {
+              let cssClass = ''
+              switch (log.type) {
+                case 'error':
+                  cssClass = 'error'
+                  break
+                case 'warn':
+                  cssClass = 'warning'
+                  break
+                default:
+                  cssClass = ''
+                  break
+              }
+              consoleOutput.value.innerHTML += `<div class="console-line ${cssClass}">${log.message}</div>`
+            })
+          } else {
+            consoleOutput.value.innerHTML +=
+              '<div class="console-line">Программа выполнена, но ничего не выведено в консоль.</div>'
+          }
+
+          consoleOutput.value.innerHTML +=
+            '<div class="console-line success">Программа выполнена успешно!</div>'
+
+          // Восстанавливаем оригинальные методы консоли
+          console.log = originalConsole.log
+          console.error = originalConsole.error
+          console.warn = originalConsole.warn
+        }, waitTime)
+      } catch (error) {
+        // В случае ошибки выводим сообщение об ошибке
+        consoleOutput.value.innerHTML += `<div class="console-line error">Ошибка при выполнении: ${error.message}</div>`
+
+        // Восстанавливаем оригинальные методы консоли
+        console.log = originalConsole.log
+        console.error = originalConsole.error
+        console.warn = originalConsole.warn
+      }
+    }
     // Очищаем консоль
     function clearConsole() {
       if (consoleOutput.value) {
@@ -548,31 +521,5 @@ function runCode() {
 
 .console-line.success {
   color: #4caf50;
-}
-
-/* Стили для выделения разных типов сообщений */
-.console-line .error {
-  color: #f44336;
-}
-
-.console-line .warning {
-  color: #ff9800;
-}
-
-/* Добавляем анимацию для индикации ожидания асинхронных операций */
-@keyframes pulse {
-  0% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.5;
-  }
-  100% {
-    opacity: 1;
-  }
-}
-
-.console-line.waiting {
-  animation: pulse 1.5s infinite;
 }
 </style>
