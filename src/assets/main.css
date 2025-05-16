@@ -1,0 +1,7 @@
+@import './base.css';
+
+/* Дополнительные стили приложения */
+#app {
+  height: 100vh;
+  overflow: hidden;
+}
